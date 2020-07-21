@@ -1,0 +1,88 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: With this CF you will build the ECS task and service for the ECS cluster. 
+Parameters:
+  ECRsiteURIPram:
+    Description: ECR Repository URI for the image. It's not necessary to add the ":latest"
+    Type: String
+  BaseStack:
+    Description: CF Stack Name already deployed in you account
+    Type: String
+
+Resources:
+  #-------------- ALB Listener --------------------------
+  MyAppECSListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref MyAppTG
+      LoadBalancerArn:
+        Fn::ImportValue: !Sub ${BaseStack}-elbRef
+      Port: '80'
+      Protocol: HTTP
+  
+
+  # ------------- ECS Task definition --------------------- 
+  MyAppECStask:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: MyApp-Site
+      ContainerDefinitions:
+      - Name: MyApp-Site
+        Cpu: '10'
+        Essential: true
+        Image: !Sub ${ECRsiteURIPram}:latest
+        Memory: 300
+        PortMappings:
+         - ContainerPort: 80
+        Environment:
+         - Name: Port
+           Value: 80
+         - Name: ServerName
+           Value: MyApp-site
+           
+  MyAppTG:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Matcher:
+        HttpCode: 200
+      Name: MyAppTG80
+      Port: 80
+      Protocol: HTTP
+      VpcId:
+        Fn::ImportValue: !Sub ${BaseStack}-VPCID
+      Tags:
+      - Key: Name
+        Value: MyApp-TG-80  
+         
+
+  # ------------------ ECS Service definition ----------------------------
+  MyAppService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - MyAppECStask
+      - MyAppECSListener
+    Properties:
+      Cluster:
+        Fn::ImportValue: !Sub ${BaseStack}-Cluster
+      DesiredCount: 2
+      LoadBalancers:
+        - ContainerName: MyApp-Site
+          ContainerPort: 80
+          TargetGroupArn: !Ref MyAppTG
+      Role:
+        Fn::ImportValue: !Sub ${BaseStack}-ECSServiceRole
+      TaskDefinition: !Ref MyAppECStask
+    
+Outputs:
+  Region:
+    Value: !Ref AWS::Region
+    Description: Region used for the lab
+  elbDNS:
+    Description: Public DNS name for the ALB. You can access the App using this DNS.
+    Value:
+      Fn::ImportValue: !Sub ${BaseStack}-ELBDNS
